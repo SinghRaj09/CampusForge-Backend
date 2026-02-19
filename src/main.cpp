@@ -9,6 +9,7 @@
 #include <jwt-cpp/jwt.h>
 #include <chrono>
 #include <random>
+#include <thread>
 
 const std::string SUPABASE_URL =
     "https://uavcodnqypzxrvffkmqf.supabase.co/rest/v1";
@@ -38,7 +39,7 @@ std::string generate_token(size_t length = 32)
     return oss.str();
 }
 
-// ================= SEND EMAIL via Gmail SMTP =================
+// ================= SEND EMAIL via Gmail SMTP (port 465, implicit SSL) =================
 bool send_email(const std::string &to,
                 const std::string &subject,
                 const std::string &html_body)
@@ -73,13 +74,19 @@ bool send_email(const std::string &to,
     struct curl_slist *recipients = nullptr;
     recipients = curl_slist_append(recipients, to.c_str());
 
-    curl_easy_setopt(curl, CURLOPT_URL, "smtp://smtp.gmail.com:587");
+    // Port 465 with smtps:// uses implicit SSL — faster and more reliable than
+    // port 587 STARTTLS (which required an extra negotiation round-trip)
+    curl_easy_setopt(curl, CURLOPT_URL, "smtps://smtp.gmail.com:465");
     curl_easy_setopt(curl, CURLOPT_USERNAME, gmail_user);
     curl_easy_setopt(curl, CURLOPT_PASSWORD, gmail_pass);
     curl_easy_setopt(curl, CURLOPT_MAIL_FROM, gmail_user);
     curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
     curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
     curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+
+    // Timeouts — prevent hanging for 15-30s on slow cloud connections
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L); // 10s to establish connection
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);        // 25s total operation timeout
 
     curl_easy_setopt(curl, CURLOPT_READFUNCTION,
         +[](char *ptr, size_t size, size_t nmemb, void *userp) -> size_t {
@@ -106,6 +113,17 @@ bool send_email(const std::string &to,
         return false;
     }
     return true;
+}
+
+// Fire-and-forget: send email in a background thread so the HTTP response
+// is returned to the user immediately without waiting for SMTP to finish.
+void send_email_async(const std::string &to,
+                      const std::string &subject,
+                      const std::string &html_body)
+{
+    std::thread([to, subject, html_body]() {
+        send_email(to, subject, html_body);
+    }).detach();
 }
 
 // ================= VALIDATION =================
@@ -325,7 +343,8 @@ int main()
                     "display:inline-block;font-family:sans-serif\">Verify Email</a>"
                     "<p style=\"color:#888\">This link expires in 24 hours.</p>";
 
-                send_email(email, "Verify your CampusForge email", html);
+                // Async: response returns immediately, email sends in background
+                send_email_async(email, "Verify your CampusForge email", html);
             }
         }
 
@@ -487,7 +506,8 @@ int main()
                 "<p style=\"color:#888\">This link expires in 1 hour. "
                 "If you did not request this, you can safely ignore it.</p>";
 
-            send_email(email, "Reset your CampusForge password", html);
+            // Async: response returns immediately, email sends in background
+            send_email_async(email, "Reset your CampusForge password", html);
         }
 
         return crow::response(200,
