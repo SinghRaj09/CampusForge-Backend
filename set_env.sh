@@ -1,0 +1,6 @@
+#!/bin/bash
+export SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdmNvZG5xeXB6eHJ2ZmZrbXFmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTIzMjM2MSwiZXhwIjoyMDg2ODA4MzYxfQ.ZlpPOmxdNM0BnvJnT52eLFJxFfIBzUTVllSAbgqZul0"
+export JWT_SECRET="4a9dbd9e5e33728b185e1621bab54ad42fa8943c174c9bb691ca5f7c559be2b1"
+export RESEND_API_KEY="re_4ANYHwwG_Cxy6NcQLhX7uJbMXDAiCeChS"
+export RESEND_FROM_EMAIL="onboarding@resend.dev"
+export FRONTEND_URL="http://localhost:5173"
