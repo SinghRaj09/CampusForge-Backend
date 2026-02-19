@@ -212,6 +212,13 @@ struct AuthMiddleware
 
         std::string token = authHeader.substr(7);
         const char *secret = std::getenv("JWT_SECRET");
+        if (!secret)
+        {
+            res.code = 500;
+            res.write("JWT_SECRET not set");
+            res.end();
+            return;
+        }
 
         try
         {

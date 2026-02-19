@@ -1,6 +1,25 @@
+# Secrets - NEVER commit these
+set_env.sh
+.env
+.env.*
+
+# Build artifacts
 build/
 *.o
-*.exe
-*.log
-.env
+*.a
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE
 .vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

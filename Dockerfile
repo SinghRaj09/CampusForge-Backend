@@ -28,6 +28,6 @@ RUN mkdir build && cd build && \
     cmake .. && \
     make -j$(nproc)
 
-EXPOSE 18080
+EXPOSE 10000
 
 CMD ["./build/CampusConnect"]
