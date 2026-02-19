@@ -10,6 +10,7 @@
 #include <chrono>
 #include <random>
 #include <thread>
+#include <cstring>
 
 const std::string SUPABASE_URL =
     "https://uavcodnqypzxrvffkmqf.supabase.co/rest/v1";
@@ -39,82 +40,83 @@ std::string generate_token(size_t length = 32)
     return oss.str();
 }
 
-// ================= JSON ESCAPE (forward declaration — full definition below) =================
+// ================= JSON ESCAPE (forward declaration) =================
 std::string escape_json(const std::string &str);
 
-// ================= SEND EMAIL via Mailjet API (HTTPS port 443 — works on Railway) =================
+// ================= SEND EMAIL via Gmail SMTP =================
 bool send_email(const std::string &to,
                 const std::string &subject,
                 const std::string &html_body)
 {
-    const char *api_key    = std::getenv("MAILJET_API_KEY");
-    const char *secret_key = std::getenv("MAILJET_SECRET_KEY");
-    const char *from_email = std::getenv("SENDER_EMAIL");
-    if (!api_key || !secret_key || !from_email) {
-        std::cerr << "MAILJET_API_KEY, MAILJET_SECRET_KEY or SENDER_EMAIL not set!" << std::endl;
+    const char *gmail_user = std::getenv("GMAIL_USER");
+    const char *gmail_pass = std::getenv("GMAIL_APP_PASSWORD");
+    if (!gmail_user || !gmail_pass) {
+        std::cerr << "GMAIL_USER or GMAIL_APP_PASSWORD not set!" << std::endl;
         return false;
     }
 
-    // Mailjet v3.1 send API JSON payload
-    std::string json_body =
-        "{"
-        "\"Messages\":[{"
-        "\"From\":{\"Email\":\"" + std::string(from_email) + "\",\"Name\":\"CampusForge\"},"
-        "\"To\":[{\"Email\":\"" + to + "\"}],"
-        "\"Subject\":\"" + subject + "\","
-        "\"HTMLPart\":\"" + escape_json(html_body) + "\""
-        "}]"
-        "}";
+    // Build RFC 2822 email message (use single quotes in HTML to avoid escaping issues)
+    std::string message =
+        "From: CampusForge <" + std::string(gmail_user) + ">\r\n"
+        "To: " + to + "\r\n"
+        "Subject: " + subject + "\r\n"
+        "MIME-Version: 1.0\r\n"
+        "Content-Type: text/html; charset=UTF-8\r\n"
+        "\r\n" +
+        html_body;
 
-    std::string response_body;
-    auto write_cb = +[](char *ptr, size_t size, size_t nmemb, void *userdata) -> size_t {
-        auto *buf = static_cast<std::string*>(userdata);
-        buf->append(ptr, size * nmemb);
-        return size * nmemb;
+    // libcurl read callback state
+    struct ReadState {
+        const std::string &data;
+        size_t offset;
+    };
+    ReadState state{message, 0};
+
+    auto read_cb = +[](char *ptr, size_t size, size_t nmemb, void *userdata) -> size_t {
+        auto *s = static_cast<ReadState*>(userdata);
+        size_t available = s->data.size() - s->offset;
+        size_t to_copy   = std::min(size * nmemb, available);
+        if (to_copy == 0) return 0;
+        std::memcpy(ptr, s->data.c_str() + s->offset, to_copy);
+        s->offset += to_copy;
+        return to_copy;
     };
 
     CURL *curl = curl_easy_init();
     if (!curl) return false;
 
-    struct curl_slist *headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
+    struct curl_slist *recipients = nullptr;
+    recipients = curl_slist_append(recipients, to.c_str());
 
-    curl_easy_setopt(curl, CURLOPT_URL, "https://api.mailjet.com/v3.1/send");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_USERPWD, (std::string(api_key) + ":" + std::string(secret_key)).c_str());
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
+    curl_easy_setopt(curl, CURLOPT_URL, "smtps://smtp.gmail.com:465");
+    curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
+    curl_easy_setopt(curl, CURLOPT_USERNAME, gmail_user);
+    curl_easy_setopt(curl, CURLOPT_PASSWORD, gmail_pass);
+    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, (std::string("<") + gmail_user + ">").c_str());
+    curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_cb);
+    curl_easy_setopt(curl, CURLOPT_READDATA, &state);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L); // Remove after testing
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);
 
     CURLcode res = curl_easy_perform(curl);
 
-    long http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
-    curl_slist_free_all(headers);
+    curl_slist_free_all(recipients);
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        std::cerr << "MAILJET FAILED | curl error: " << curl_easy_strerror(res)
+        std::cerr << "GMAIL SMTP FAILED | " << curl_easy_strerror(res)
                   << " (code=" << res << ") | to=" << to << std::endl;
         return false;
     }
 
-    if (http_code == 200) {
-        std::cerr << "MAILJET SUCCESS | email sent to: " << to << std::endl;
-        return true;
-    } else {
-        std::cerr << "MAILJET FAILED | http_code=" << http_code
-                  << " | response=" << response_body
-                  << " | to=" << to << std::endl;
-        return false;
-    }
+    std::cerr << "GMAIL SMTP SUCCESS | email sent to: " << to << std::endl;
+    return true;
 }
 
-// Fire-and-forget: send email in a background thread so the HTTP response
-// is returned to the user immediately without waiting for SMTP to finish.
+// Fire-and-forget: send email in background thread
 void send_email_async(const std::string &to,
                       const std::string &subject,
                       const std::string &html_body)
@@ -262,7 +264,6 @@ struct AuthMiddleware
 
 int main()
 {
-
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     const char *key = std::getenv("SUPABASE_KEY");
@@ -333,15 +334,15 @@ int main()
                 std::string frontend_url = fe ? fe : "http://localhost:5173";
                 std::string link = frontend_url + "/verify-email?token=" + token;
 
+                // Use single quotes in HTML styles to avoid JSON escaping issues
                 std::string html =
-                    "<h2>Welcome to CampusForge, " + escape_json(full_name) + "!</h2>"
+                    "<h2>Welcome to CampusForge, " + full_name + "!</h2>"
                     "<p>Click the button below to verify your email address.</p>"
-                    "<a href=\"" + link + "\" style=\"background:#4f46e5;color:white;"
+                    "<a href='" + link + "' style='background:#4f46e5;color:white;"
                     "padding:12px 24px;border-radius:6px;text-decoration:none;"
-                    "display:inline-block;font-family:sans-serif\">Verify Email</a>"
-                    "<p style=\"color:#888\">This link expires in 24 hours.</p>";
+                    "display:inline-block;font-family:sans-serif'>Verify Email</a>"
+                    "<p style='color:#888'>This link expires in 24 hours.</p>";
 
-                // Async: response returns immediately, email sends in background
                 send_email_async(email, "Verify your CampusForge email", html);
             }
         }
@@ -495,16 +496,16 @@ int main()
             std::string frontend_url = fe ? fe : "http://localhost:5173";
             std::string link = frontend_url + "/reset-password?token=" + token;
 
+            // Use single quotes in HTML styles to avoid JSON escaping issues
             std::string html =
                 "<h2>Reset your CampusForge password</h2>"
                 "<p>We received a password reset request for your account.</p>"
-                "<a href=\"" + link + "\" style=\"background:#4f46e5;color:white;"
+                "<a href='" + link + "' style='background:#4f46e5;color:white;"
                 "padding:12px 24px;border-radius:6px;text-decoration:none;"
-                "display:inline-block;font-family:sans-serif\">Reset Password</a>"
-                "<p style=\"color:#888\">This link expires in 1 hour. "
+                "display:inline-block;font-family:sans-serif'>Reset Password</a>"
+                "<p style='color:#888'>This link expires in 1 hour. "
                 "If you did not request this, you can safely ignore it.</p>";
 
-            // Async: response returns immediately, email sends in background
             send_email_async(email, "Reset your CampusForge password", html);
         }
 
@@ -760,5 +761,4 @@ int main()
     app.port(port).multithreaded().run();
 
     curl_global_cleanup();
-
 }
