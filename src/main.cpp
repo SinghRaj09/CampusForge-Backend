@@ -39,85 +39,78 @@ std::string generate_token(size_t length = 32)
     return oss.str();
 }
 
-// ================= SEND EMAIL via Gmail SMTP (port 465, implicit SSL) =================
+// ================= JSON ESCAPE (forward declaration — full definition below) =================
+std::string escape_json(const std::string &str);
+
+// ================= SEND EMAIL via Mailjet API (HTTPS port 443 — works on Railway) =================
 bool send_email(const std::string &to,
                 const std::string &subject,
                 const std::string &html_body)
 {
-    const char *gmail_user = std::getenv("GMAIL_USER");
-    const char *gmail_pass = std::getenv("GMAIL_APP_PASSWORD");
-    if (!gmail_user || !gmail_pass) {
-        std::cerr << "GMAIL_USER or GMAIL_APP_PASSWORD not set!" << std::endl;
+    const char *api_key    = std::getenv("MAILJET_API_KEY");
+    const char *secret_key = std::getenv("MAILJET_SECRET_KEY");
+    const char *from_email = std::getenv("SENDER_EMAIL");
+    if (!api_key || !secret_key || !from_email) {
+        std::cerr << "MAILJET_API_KEY, MAILJET_SECRET_KEY or SENDER_EMAIL not set!" << std::endl;
         return false;
     }
 
-    // Build raw email message
-    std::string message =
-        "From: CampusForge <" + std::string(gmail_user) + ">\r\n"
-        "To: " + to + "\r\n"
-        "Subject: " + subject + "\r\n"
-        "MIME-Version: 1.0\r\n"
-        "Content-Type: text/html; charset=UTF-8\r\n"
-        "\r\n" +
-        html_body;
+    // Mailjet v3.1 send API JSON payload
+    std::string json_body =
+        "{"
+        "\"Messages\":[{"
+        "\"From\":{\"Email\":\"" + std::string(from_email) + "\",\"Name\":\"CampusForge\"},"
+        "\"To\":[{\"Email\":\"" + to + "\"}],"
+        "\"Subject\":\"" + subject + "\","
+        "\"HTMLPart\":\"" + escape_json(html_body) + "\""
+        "}]"
+        "}";
 
-    struct upload_status {
-        const std::string *data;
-        size_t offset;
+    std::string response_body;
+    auto write_cb = +[](char *ptr, size_t size, size_t nmemb, void *userdata) -> size_t {
+        auto *buf = static_cast<std::string*>(userdata);
+        buf->append(ptr, size * nmemb);
+        return size * nmemb;
     };
-
-    upload_status upload_ctx = {&message, 0};
 
     CURL *curl = curl_easy_init();
     if (!curl) return false;
 
-    struct curl_slist *recipients = nullptr;
-    recipients = curl_slist_append(recipients, to.c_str());
+    struct curl_slist *headers = nullptr;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
 
-    // Port 587 with STARTTLS — Railway blocks 465, so use 587
-    curl_easy_setopt(curl, CURLOPT_URL, "smtp://smtp.gmail.com:587");
-    curl_easy_setopt(curl, CURLOPT_USERNAME, gmail_user);
-    curl_easy_setopt(curl, CURLOPT_PASSWORD, gmail_pass);
-    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, gmail_user);
-    curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
-    curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
-    curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
-
-    // Timeouts — prevent hanging for 15-30s on slow cloud connections
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L); // 10s to establish connection
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);        // 25s total operation timeout
-    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);         // TEMP: verbose logging to diagnose
-
-    curl_easy_setopt(curl, CURLOPT_READFUNCTION,
-        +[](char *ptr, size_t size, size_t nmemb, void *userp) -> size_t {
-            auto *u = static_cast<upload_status*>(userp);
-            size_t room = size * nmemb;
-            size_t len  = u->data->size() - u->offset;
-            if (len == 0) return 0;
-            size_t copy = std::min(room, len);
-            memcpy(ptr, u->data->c_str() + u->offset, copy);
-            u->offset += copy;
-            return copy;
-        });
-    curl_easy_setopt(curl, CURLOPT_READDATA, &upload_ctx);
-    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_URL, "https://api.mailjet.com/v3.1/send");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, (std::string(api_key) + ":" + std::string(secret_key)).c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);
 
     CURLcode res = curl_easy_perform(curl);
 
-    curl_slist_free_all(recipients);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        long smtp_code = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &smtp_code);
-        std::cerr << "SMTP FAILED | curl error: " << curl_easy_strerror(res)
-                  << " (code=" << res << ")"
-                  << " | smtp_response=" << smtp_code
+        std::cerr << "MAILJET FAILED | curl error: " << curl_easy_strerror(res)
+                  << " (code=" << res << ") | to=" << to << std::endl;
+        return false;
+    }
+
+    if (http_code == 200) {
+        std::cerr << "MAILJET SUCCESS | email sent to: " << to << std::endl;
+        return true;
+    } else {
+        std::cerr << "MAILJET FAILED | http_code=" << http_code
+                  << " | response=" << response_body
                   << " | to=" << to << std::endl;
         return false;
     }
-    std::cerr << "SMTP SUCCESS | email sent to: " << to << std::endl;
-    return true;
 }
 
 // Fire-and-forget: send email in a background thread so the HTTP response
