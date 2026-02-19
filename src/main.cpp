@@ -88,7 +88,7 @@ bool send_email(const std::string &to,
     struct curl_slist *recipients = nullptr;
     recipients = curl_slist_append(recipients, to.c_str());
 
-    curl_easy_setopt(curl, CURLOPT_URL, "smtps://smtp.gmail.com:465");
+    curl_easy_setopt(curl, CURLOPT_URL, "smtps://smtp.gmail.com:587");
     curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
     curl_easy_setopt(curl, CURLOPT_USERNAME, gmail_user);
     curl_easy_setopt(curl, CURLOPT_PASSWORD, gmail_pass);
