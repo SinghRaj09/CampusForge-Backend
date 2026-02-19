@@ -74,9 +74,8 @@ bool send_email(const std::string &to,
     struct curl_slist *recipients = nullptr;
     recipients = curl_slist_append(recipients, to.c_str());
 
-    // Port 465 with smtps:// uses implicit SSL — faster and more reliable than
-    // port 587 STARTTLS (which required an extra negotiation round-trip)
-    curl_easy_setopt(curl, CURLOPT_URL, "smtps://smtp.gmail.com:465");
+    // Port 587 with STARTTLS — Railway blocks 465, so use 587
+    curl_easy_setopt(curl, CURLOPT_URL, "smtp://smtp.gmail.com:587");
     curl_easy_setopt(curl, CURLOPT_USERNAME, gmail_user);
     curl_easy_setopt(curl, CURLOPT_PASSWORD, gmail_pass);
     curl_easy_setopt(curl, CURLOPT_MAIL_FROM, gmail_user);
