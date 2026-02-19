@@ -87,6 +87,7 @@ bool send_email(const std::string &to,
     // Timeouts — prevent hanging for 15-30s on slow cloud connections
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L); // 10s to establish connection
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);        // 25s total operation timeout
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);         // TEMP: verbose logging to diagnose
 
     curl_easy_setopt(curl, CURLOPT_READFUNCTION,
         +[](char *ptr, size_t size, size_t nmemb, void *userp) -> size_t {
@@ -108,10 +109,15 @@ bool send_email(const std::string &to,
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        std::cerr << "curl_easy_perform() failed: "
-                  << curl_easy_strerror(res) << std::endl;
+        long smtp_code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &smtp_code);
+        std::cerr << "SMTP FAILED | curl error: " << curl_easy_strerror(res)
+                  << " (code=" << res << ")"
+                  << " | smtp_response=" << smtp_code
+                  << " | to=" << to << std::endl;
         return false;
     }
+    std::cerr << "SMTP SUCCESS | email sent to: " << to << std::endl;
     return true;
 }
 
