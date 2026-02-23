@@ -11,6 +11,7 @@
 #include <random>
 #include <thread>
 #include <cstring>
+#include <vector>
 
 const std::string SUPABASE_URL =
     "https://uavcodnqypzxrvffkmqf.supabase.co/rest/v1";
@@ -49,7 +50,7 @@ bool send_email(const std::string &to,
                 const std::string &html_body)
 {
     const char *resend_key = std::getenv("RESEND_API_KEY");
-    const char *from_email = std::getenv("SENDER_EMAIL"); // e.g. noreply@campusforge.me
+    const char *from_email = std::getenv("SENDER_EMAIL");
     if (!resend_key || !from_email) {
         std::cerr << "RESEND_API_KEY or SENDER_EMAIL not set!" << std::endl;
         return false;
@@ -148,24 +149,47 @@ std::string escape_json(const std::string &str)
     return result;
 }
 
-// ================= CORS =================
+// ================= CORS HELPER =================
+// Returns true if origin is in the allowed list
+bool is_allowed_origin(const std::string &origin)
+{
+    static const std::vector<std::string> allowed = {
+        "https://campusforge.me",
+        "https://www.campusforge.me",
+        "http://localhost:5173",
+        "http://localhost:3000"
+    };
+    for (const auto &o : allowed)
+        if (origin == o) return true;
+    return false;
+}
+
+void apply_cors_headers(crow::response &res, const std::string &origin)
+{
+    res.set_header("Access-Control-Allow-Origin", origin);
+    res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.set_header("Access-Control-Allow-Credentials", "true");
+    res.set_header("Access-Control-Max-Age", "86400");
+}
+
+// ================= CORS MIDDLEWARE =================
 struct CORSMiddleware
 {
     struct context
     {
+        std::string origin;
     };
 
     void before_handle(crow::request &req,
                        crow::response &res,
-                       context &)
+                       context &ctx)
     {
-        const char *fe = std::getenv("FRONTEND_URL");
-        std::string origin = fe ? fe : "http://localhost:5173";
+        std::string origin = req.get_header_value("Origin");
+        ctx.origin = origin;
 
-        res.set_header("Access-Control-Allow-Origin", origin);
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        res.set_header("Access-Control-Max-Age", "86400");
+        if (is_allowed_origin(origin))
+            apply_cors_headers(res, origin);
 
         if (req.method == crow::HTTPMethod::OPTIONS)
         {
@@ -177,18 +201,14 @@ struct CORSMiddleware
 
     void after_handle(crow::request &,
                       crow::response &res,
-                      context &)
+                      context &ctx)
     {
-        const char *fe = std::getenv("FRONTEND_URL");
-        std::string origin = fe ? fe : "http://localhost:5173";
-
-        res.set_header("Access-Control-Allow-Origin", origin);
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        if (is_allowed_origin(ctx.origin))
+            apply_cors_headers(res, ctx.origin);
     }
 };
 
-// ================= AUTH =================
+// ================= AUTH MIDDLEWARE =================
 struct AuthMiddleware
 {
     struct context
