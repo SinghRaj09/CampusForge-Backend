@@ -23,8 +23,8 @@ WORKDIR /app
 # Copy backend files
 COPY . .
 
-# Build backend
-RUN mkdir build && cd build && \
+# cache bust - force recompile
+RUN echo "bust" && mkdir build && cd build && \
     cmake .. && \
     make -j$(nproc)
 
