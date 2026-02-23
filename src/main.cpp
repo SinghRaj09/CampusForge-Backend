@@ -43,77 +43,71 @@ std::string generate_token(size_t length = 32)
 // ================= JSON ESCAPE (forward declaration) =================
 std::string escape_json(const std::string &str);
 
-// ================= SEND EMAIL via Gmail SMTP =================
+// ================= SEND EMAIL via Resend HTTP API =================
 bool send_email(const std::string &to,
                 const std::string &subject,
                 const std::string &html_body)
 {
-    const char *gmail_user = std::getenv("GMAIL_USER");
-    const char *gmail_pass = std::getenv("GMAIL_APP_PASSWORD");
-    if (!gmail_user || !gmail_pass) {
-        std::cerr << "GMAIL_USER or GMAIL_APP_PASSWORD not set!" << std::endl;
+    const char *resend_key = std::getenv("re_FgoH1Uht_AN3U1eF6vfgw4PpyUwzDFCHK");
+    const char *from_email = std::getenv("noreply@campusforge.me"); // e.g. noreply@campusforge.me
+    if (!resend_key || !from_email) {
+        std::cerr << "RESEND_API_KEY or SENDER_EMAIL not set!" << std::endl;
         return false;
     }
 
-    // Build RFC 2822 email message (use single quotes in HTML to avoid escaping issues)
-    std::string message =
-        "From: CampusForge <" + std::string(gmail_user) + ">\r\n"
-        "To: " + to + "\r\n"
-        "Subject: " + subject + "\r\n"
-        "MIME-Version: 1.0\r\n"
-        "Content-Type: text/html; charset=UTF-8\r\n"
-        "\r\n" +
-        html_body;
+    std::string json_body =
+        "{"
+        "\"from\":\"CampusForge <" + std::string(from_email) + ">\","
+        "\"to\":[\"" + to + "\"],"
+        "\"subject\":\"" + escape_json(subject) + "\","
+        "\"html\":\"" + escape_json(html_body) + "\""
+        "}";
 
-    // libcurl read callback state
-    struct ReadState {
-        const std::string &data;
-        size_t offset;
-    };
-    ReadState state{message, 0};
-
-    auto read_cb = +[](char *ptr, size_t size, size_t nmemb, void *userdata) -> size_t {
-        auto *s = static_cast<ReadState*>(userdata);
-        size_t available = s->data.size() - s->offset;
-        size_t to_copy   = std::min(size * nmemb, available);
-        if (to_copy == 0) return 0;
-        std::memcpy(ptr, s->data.c_str() + s->offset, to_copy);
-        s->offset += to_copy;
-        return to_copy;
+    std::string response_body;
+    auto write_cb = +[](char *ptr, size_t size, size_t nmemb, void *userdata) -> size_t {
+        auto *buf = static_cast<std::string*>(userdata);
+        buf->append(ptr, size * nmemb);
+        return size * nmemb;
     };
 
     CURL *curl = curl_easy_init();
     if (!curl) return false;
 
-    struct curl_slist *recipients = nullptr;
-    recipients = curl_slist_append(recipients, to.c_str());
+    struct curl_slist *headers = nullptr;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, (std::string("Authorization: Bearer ") + resend_key).c_str());
 
-    curl_easy_setopt(curl, CURLOPT_URL, "smtps://smtp.gmail.com:587");
-    curl_easy_setopt(curl, CURLOPT_USE_SSL, CURLUSESSL_ALL);
-    curl_easy_setopt(curl, CURLOPT_USERNAME, gmail_user);
-    curl_easy_setopt(curl, CURLOPT_PASSWORD, gmail_pass);
-    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, (std::string("<") + gmail_user + ">").c_str());
-    curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
-    curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_cb);
-    curl_easy_setopt(curl, CURLOPT_READDATA, &state);
-    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
-    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L); // Remove after testing
+    curl_easy_setopt(curl, CURLOPT_URL, "https://api.resend.com/emails");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);
 
     CURLcode res = curl_easy_perform(curl);
 
-    curl_slist_free_all(recipients);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        std::cerr << "GMAIL SMTP FAILED | " << curl_easy_strerror(res)
-                  << " (code=" << res << ") | to=" << to << std::endl;
+        std::cerr << "RESEND FAILED | curl error: " << curl_easy_strerror(res)
+                  << " | to=" << to << std::endl;
         return false;
     }
 
-    std::cerr << "GMAIL SMTP SUCCESS | email sent to: " << to << std::endl;
-    return true;
+    if (http_code == 200 || http_code == 201) {
+        std::cerr << "RESEND SUCCESS | email sent to: " << to << std::endl;
+        return true;
+    } else {
+        std::cerr << "RESEND FAILED | http_code=" << http_code
+                  << " | response=" << response_body
+                  << " | to=" << to << std::endl;
+        return false;
+    }
 }
 
 // Fire-and-forget: send email in background thread
@@ -334,7 +328,6 @@ int main()
                 std::string frontend_url = fe ? fe : "http://localhost:5173";
                 std::string link = frontend_url + "/verify-email?token=" + token;
 
-                // Use single quotes in HTML styles to avoid JSON escaping issues
                 std::string html =
                     "<h2>Welcome to CampusForge, " + full_name + "!</h2>"
                     "<p>Click the button below to verify your email address.</p>"
@@ -496,7 +489,6 @@ int main()
             std::string frontend_url = fe ? fe : "http://localhost:5173";
             std::string link = frontend_url + "/reset-password?token=" + token;
 
-            // Use single quotes in HTML styles to avoid JSON escaping issues
             std::string html =
                 "<h2>Reset your CampusForge password</h2>"
                 "<p>We received a password reset request for your account.</p>"
