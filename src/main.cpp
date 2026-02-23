@@ -48,8 +48,8 @@ bool send_email(const std::string &to,
                 const std::string &subject,
                 const std::string &html_body)
 {
-    const char *resend_key = std::getenv("re_FgoH1Uht_AN3U1eF6vfgw4PpyUwzDFCHK");
-    const char *from_email = std::getenv("noreply@campusforge.me"); // e.g. noreply@campusforge.me
+    const char *resend_key = std::getenv("RESEND_API_KEY");
+    const char *from_email = std::getenv("SENDER_EMAIL"); // e.g. noreply@campusforge.me
     if (!resend_key || !from_email) {
         std::cerr << "RESEND_API_KEY or SENDER_EMAIL not set!" << std::endl;
         return false;
