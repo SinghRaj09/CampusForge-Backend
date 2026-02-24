@@ -44,32 +44,11 @@ std::string generate_token(size_t length = 32)
 std::string escape_json(const std::string &str);
 
 // ================= CORS HELPER =================
-// Returns true if the request origin is allowed
 bool is_allowed_origin(const std::string &origin)
 {
-    const char *fe = std::getenv("FRONTEND_URL");
-    std::string base = fe ? fe : "http://localhost:5173";
-
-    // Always allow exact match
-    if (origin == base) return true;
-
-    // Allow both www and non-www variants
-    // If base is https://campusforge.me, also allow https://www.campusforge.me
-    // If base is https://www.campusforge.me, also allow https://campusforge.me
-    if (base.find("://www.") != std::string::npos) {
-        // base has www, build non-www
-        std::string nowww = base.substr(0, base.find("://") + 3) +
-                            base.substr(base.find("://www.") + 7);
-        if (origin == nowww) return true;
-    } else {
-        // base has no www, build www
-        std::string withwww = base.substr(0, base.find("://") + 3) +
-                              "www." +
-                              base.substr(base.find("://") + 3);
-        if (origin == withwww) return true;
-    }
-
-    return false;
+    return origin == "https://campusforge.me" ||
+           origin == "https://www.campusforge.me" ||
+           origin == "http://localhost:5173";
 }
 
 // ================= SEND EMAIL via Resend HTTP API =================
@@ -187,10 +166,9 @@ struct CORSMiddleware
                        context &)
     {
         std::string origin = req.get_header_value("Origin");
-        std::string allowed = is_allowed_origin(origin) ? origin : "";
 
-        if (!allowed.empty())
-            res.set_header("Access-Control-Allow-Origin", allowed);
+        if (is_allowed_origin(origin))
+            res.set_header("Access-Control-Allow-Origin", origin);
 
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -209,10 +187,9 @@ struct CORSMiddleware
                       context &)
     {
         std::string origin = req.get_header_value("Origin");
-        std::string allowed = is_allowed_origin(origin) ? origin : "";
 
-        if (!allowed.empty())
-            res.set_header("Access-Control-Allow-Origin", allowed);
+        if (is_allowed_origin(origin))
+            res.set_header("Access-Control-Allow-Origin", origin);
 
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
