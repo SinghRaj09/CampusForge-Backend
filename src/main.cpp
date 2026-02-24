@@ -15,20 +15,16 @@
 const std::string SUPABASE_URL =
     "https://uavcodnqypzxrvffkmqf.supabase.co/rest/v1";
 
-// ================= SHA256 =================
 std::string sha256(const std::string &str)
 {
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256(reinterpret_cast<const unsigned char *>(str.c_str()), str.size(), hash);
-
     std::stringstream ss;
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-        ss << std::hex << std::setw(2)
-           << std::setfill('0') << (int)hash[i];
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
     return ss.str();
 }
 
-// ================= RANDOM TOKEN =================
 std::string generate_token(size_t length = 32)
 {
     std::random_device rd;
@@ -40,10 +36,8 @@ std::string generate_token(size_t length = 32)
     return oss.str();
 }
 
-// ================= JSON ESCAPE (forward declaration) =================
 std::string escape_json(const std::string &str);
 
-// ================= CORS HELPER =================
 bool is_allowed_origin(const std::string &origin)
 {
     return origin == "https://campusforge.me" ||
@@ -51,7 +45,6 @@ bool is_allowed_origin(const std::string &origin)
            origin == "http://localhost:5173";
 }
 
-// ================= SEND EMAIL via Resend HTTP API =================
 bool send_email(const std::string &to,
                 const std::string &subject,
                 const std::string &html_body)
@@ -94,196 +87,135 @@ bool send_email(const std::string &to,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);
 
     CURLcode res = curl_easy_perform(curl);
-
     long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        std::cerr << "RESEND FAILED | curl error: " << curl_easy_strerror(res)
-                  << " | to=" << to << std::endl;
+        std::cerr << "RESEND FAILED | " << curl_easy_strerror(res) << " | to=" << to << std::endl;
         return false;
     }
-
     if (http_code == 200 || http_code == 201) {
         std::cerr << "RESEND SUCCESS | email sent to: " << to << std::endl;
         return true;
     } else {
-        std::cerr << "RESEND FAILED | http_code=" << http_code
-                  << " | response=" << response_body
-                  << " | to=" << to << std::endl;
+        std::cerr << "RESEND FAILED | http_code=" << http_code << " | response=" << response_body << std::endl;
         return false;
     }
 }
 
-// Fire-and-forget: send email in background thread
-void send_email_async(const std::string &to,
-                      const std::string &subject,
-                      const std::string &html_body)
+void send_email_async(const std::string &to, const std::string &subject, const std::string &html_body)
 {
     std::thread([to, subject, html_body]() {
         send_email(to, subject, html_body);
     }).detach();
 }
 
-// ================= VALIDATION =================
 bool is_valid_status(const std::string &status)
 {
     return status == "live" || status == "expired";
 }
 
-// ================= JSON ESCAPE =================
 std::string escape_json(const std::string &str)
 {
     std::string result;
-    for (char c : str)
-    {
-        if (c == '"')
-            result += "\\\"";
-        else if (c == '\\')
-            result += "\\\\";
-        else if (c == '\n')
-            result += "\\n";
-        else if (c == '\r')
-            result += "\\r";
-        else if (c == '\t')
-            result += "\\t";
-        else
-            result += c;
+    for (char c : str) {
+        if (c == '"') result += "\\\"";
+        else if (c == '\\') result += "\\\\";
+        else if (c == '\n') result += "\\n";
+        else if (c == '\r') result += "\\r";
+        else if (c == '\t') result += "\\t";
+        else result += c;
     }
     return result;
 }
 
-// ================= CORS =================
 struct CORSMiddleware
 {
     struct context {};
 
-    void before_handle(crow::request &req,
-                       crow::response &res,
-                       context &)
+    void before_handle(crow::request &req, crow::response &res, context &)
     {
         std::string origin = req.get_header_value("Origin");
-
         if (is_allowed_origin(origin))
             res.set_header("Access-Control-Allow-Origin", origin);
-
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
         res.set_header("Access-Control-Max-Age", "86400");
-
-        if (req.method == crow::HTTPMethod::OPTIONS)
-        {
-            res.code = 204;
-            res.end();
-            return;
-        }
     }
 
-    void after_handle(crow::request &req,
-                      crow::response &res,
-                      context &)
+    void after_handle(crow::request &req, crow::response &res, context &)
     {
         std::string origin = req.get_header_value("Origin");
-
         if (is_allowed_origin(origin))
             res.set_header("Access-Control-Allow-Origin", origin);
-
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }
 };
 
-// ================= AUTH =================
 struct AuthMiddleware
 {
-    struct context
-    {
-        std::string user_email;
-    };
+    struct context { std::string user_email; };
 
-    void before_handle(crow::request &req,
-                       crow::response &res,
-                       context &ctx)
+    void before_handle(crow::request &req, crow::response &res, context &ctx)
     {
-        if (req.method == crow::HTTPMethod::OPTIONS)
-            return;
+        if (req.method == crow::HTTPMethod::OPTIONS) return;
 
-        if (req.url == "/" ||
-            req.url == "/signup" ||
-            req.url == "/login" ||
-            req.url == "/forgot-password" ||
-            req.url == "/reset-password" ||
-            req.url == "/verify-email" ||
-            req.url.rfind("/projects", 0) == 0)
+        if (req.url == "/" || req.url == "/signup" || req.url == "/login" ||
+            req.url == "/forgot-password" || req.url == "/reset-password" ||
+            req.url == "/verify-email" || req.url.rfind("/projects", 0) == 0)
             return;
 
         auto authHeader = req.get_header_value("Authorization");
-
-        if (authHeader.empty() || authHeader.substr(0, 7) != "Bearer ")
-        {
-            res.code = 401;
-            res.write("Unauthorized");
-            res.end();
-            return;
+        if (authHeader.empty() || authHeader.substr(0, 7) != "Bearer ") {
+            res.code = 401; res.write("Unauthorized"); res.end(); return;
         }
 
         std::string token = authHeader.substr(7);
         const char *secret = std::getenv("JWT_SECRET");
-        if (!secret)
-        {
-            res.code = 500;
-            res.write("JWT_SECRET not set");
-            res.end();
-            return;
-        }
+        if (!secret) { res.code = 500; res.write("JWT_SECRET not set"); res.end(); return; }
 
-        try
-        {
+        try {
             auto decoded = jwt::decode(token);
             jwt::verify()
                 .allow_algorithm(jwt::algorithm::hs256{secret})
                 .with_issuer("CampusConnect")
                 .verify(decoded);
-
-            ctx.user_email =
-                decoded.get_payload_claim("email").as_string();
-        }
-        catch (...)
-        {
-            res.code = 401;
-            res.write("Invalid token");
-            res.end();
-            return;
+            ctx.user_email = decoded.get_payload_claim("email").as_string();
+        } catch (...) {
+            res.code = 401; res.write("Invalid token"); res.end(); return;
         }
     }
 
     void after_handle(crow::request &, crow::response &, context &) {}
 };
 
-
 int main()
 {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     const char *key = std::getenv("SUPABASE_KEY");
-    if (!key)
-    {
-        std::cerr << "SUPABASE_KEY not set!" << std::endl;
-        return 1;
-    }
+    if (!key) { std::cerr << "SUPABASE_KEY not set!" << std::endl; return 1; }
 
     std::string API_KEY = key;
     crow::App<CORSMiddleware, AuthMiddleware> app;
 
-    CROW_ROUTE(app, "/")([]()
-                         { return "CampusConnect Backend Running!"; });
+    CROW_ROUTE(app, "/")([]() { return "CampusConnect Backend Running!"; });
+
+    // ================= OPTIONS PREFLIGHT =================
+    CROW_ROUTE(app, "/<path>").methods("OPTIONS"_method)([](const crow::request& req, std::string) {
+        crow::response res(204);
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.set_header("Access-Control-Max-Age", "86400");
+        return res;
+    });
 
     // ================= SIGNUP =================
-    CROW_ROUTE(app, "/signup").methods("POST"_method)([API_KEY](const crow::request &req)
-                                                      {
+    CROW_ROUTE(app, "/signup").methods("POST"_method)([API_KEY](const crow::request &req) {
         auto body = crow::json::load(req.body);
         if (!body) return crow::response(400, "Invalid JSON");
 
@@ -298,38 +230,25 @@ int main()
 
         auto r = cpr::Post(
             cpr::Url{SUPABASE_URL + "/users"},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Content-Type", "application/json"},
-                {"Prefer", "return=minimal"}},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{jsonBody});
 
-        if (r.status_code == 201)
-        {
+        if (r.status_code == 201) {
             auto ur = cpr::Get(
                 cpr::Url{SUPABASE_URL + "/users?email=eq." + email + "&select=id"},
-                cpr::Header{
-                    {"apikey", API_KEY},
-                    {"Authorization", "Bearer " + API_KEY}});
+                cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY}});
 
             auto ujson = crow::json::load(ur.text);
-            if (ujson && ujson.size() > 0)
-            {
+            if (ujson && ujson.size() > 0) {
                 int user_id = ujson[0]["id"].i();
-
                 std::string token = generate_token();
                 std::string vtBody =
-                    "{\"user_id\":" + std::to_string(user_id) +
-                    ",\"token\":\"" + token + "\"}";
+                    "{\"user_id\":" + std::to_string(user_id) + ",\"token\":\"" + token + "\"}";
 
-                cpr::Post(
-                    cpr::Url{SUPABASE_URL + "/email_verifications"},
-                    cpr::Header{
-                        {"apikey", API_KEY},
-                        {"Authorization", "Bearer " + API_KEY},
-                        {"Content-Type", "application/json"},
-                        {"Prefer", "return=minimal"}},
+                cpr::Post(cpr::Url{SUPABASE_URL + "/email_verifications"},
+                    cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                                {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
                     cpr::Body{vtBody});
 
                 const char *fe = std::getenv("FRONTEND_URL");
@@ -347,36 +266,26 @@ int main()
                 send_email_async(email, "Verify your CampusForge email", html);
             }
         }
-
-        return crow::response(r.status_code, r.text); });
+        return crow::response(r.status_code, r.text);
+    });
 
     // ================= LOGIN =================
-    CROW_ROUTE(app, "/login").methods("POST"_method)([API_KEY](const crow::request &req)
-                                                     {
+    CROW_ROUTE(app, "/login").methods("POST"_method)([API_KEY](const crow::request &req) {
         auto body = crow::json::load(req.body);
         if (!body) return crow::response(400, "Invalid JSON");
 
         std::string email    = body["email"].s();
         std::string password = body["password"].s();
 
-        auto r = cpr::Get(
-            cpr::Url{SUPABASE_URL + "/users?email=eq." + email},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY}});
+        auto r = cpr::Get(cpr::Url{SUPABASE_URL + "/users?email=eq." + email},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY}});
 
         auto json = crow::json::load(r.text);
-        if (!json || json.size() == 0)
-            return crow::response(400, "User not found");
-
-        if (json[0]["password"].s() != sha256(password))
-            return crow::response(400, "Incorrect password");
+        if (!json || json.size() == 0) return crow::response(400, "User not found");
+        if (json[0]["password"].s() != sha256(password)) return crow::response(400, "Incorrect password");
 
         const char *secret = std::getenv("JWT_SECRET");
-        if (!secret)
-        {
-            return crow::response(500, "JWT_SECRET not set");
-        }
+        if (!secret) return crow::response(500, "JWT_SECRET not set");
 
         auto token = jwt::create()
             .set_issuer("CampusConnect")
@@ -388,109 +297,72 @@ int main()
         result["token"]     = token;
         result["full_name"] = std::string(json[0]["full_name"].s());
         result["email"]     = email;
-
-        return crow::response(result); });
+        return crow::response(result);
+    });
 
     // ================= VERIFY EMAIL =================
-    CROW_ROUTE(app, "/verify-email").methods("GET"_method)([API_KEY](const crow::request &req)
-                                                           {
+    CROW_ROUTE(app, "/verify-email").methods("GET"_method)([API_KEY](const crow::request &req) {
         auto token_param = req.url_params.get("token");
-        if (!token_param)
-            return crow::response(400, "{\"error\":\"Token required\"}");
+        if (!token_param) return crow::response(400, "{\"error\":\"Token required\"}");
 
         std::string token = token_param;
-
         auto now_tp = std::chrono::system_clock::now();
         auto now_t  = std::chrono::system_clock::to_time_t(now_tp);
         std::tm tm_utc{};
-#ifdef _WIN32
-        gmtime_s(&tm_utc, &now_t);
-#else
         gmtime_r(&now_t, &tm_utc);
-#endif
         char now_buf[32];
         std::strftime(now_buf, sizeof(now_buf), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
         std::string now_str(now_buf);
 
         auto tr = cpr::Get(
-            cpr::Url{SUPABASE_URL + "/email_verifications"
-                     "?token=eq." + token +
-                     "&used=eq.false"
-                     "&expires_at=gte." + now_str +
-                     "&select=id,user_id"},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY}});
+            cpr::Url{SUPABASE_URL + "/email_verifications?token=eq." + token +
+                     "&used=eq.false&expires_at=gte." + now_str + "&select=id,user_id"},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY}});
 
         auto rows = crow::json::load(tr.text);
-        if (!rows || rows.size() == 0)
-            return crow::response(400, "{\"error\":\"Invalid or expired token\"}");
+        if (!rows || rows.size() == 0) return crow::response(400, "{\"error\":\"Invalid or expired token\"}");
 
         int row_id  = rows[0]["id"].i();
         int user_id = rows[0]["user_id"].i();
 
-        cpr::Patch(
-            cpr::Url{SUPABASE_URL + "/email_verifications?id=eq." + std::to_string(row_id)},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Content-Type", "application/json"},
-                {"Prefer", "return=minimal"}},
+        cpr::Patch(cpr::Url{SUPABASE_URL + "/email_verifications?id=eq." + std::to_string(row_id)},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{"{\"used\":true}"});
 
-        cpr::Patch(
-            cpr::Url{SUPABASE_URL + "/users?id=eq." + std::to_string(user_id)},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Content-Type", "application/json"},
-                {"Prefer", "return=minimal"}},
+        cpr::Patch(cpr::Url{SUPABASE_URL + "/users?id=eq." + std::to_string(user_id)},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{"{\"email_verified\":true}"});
 
-        return crow::response(200, "{\"message\":\"Email verified successfully\"}"); });
+        return crow::response(200, "{\"message\":\"Email verified successfully\"}");
+    });
 
     // ================= FORGOT PASSWORD =================
-    CROW_ROUTE(app, "/forgot-password").methods("POST"_method)([API_KEY](const crow::request &req)
-                                                               {
+    CROW_ROUTE(app, "/forgot-password").methods("POST"_method)([API_KEY](const crow::request &req) {
         auto body = crow::json::load(req.body);
         if (!body) return crow::response(400, "Invalid JSON");
 
         std::string email = body["email"].s();
-
-        auto ur = cpr::Get(
-            cpr::Url{SUPABASE_URL + "/users?email=eq." + email + "&select=id"},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY}});
+        auto ur = cpr::Get(cpr::Url{SUPABASE_URL + "/users?email=eq." + email + "&select=id"},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY}});
 
         auto users = crow::json::load(ur.text);
-        if (users && users.size() > 0)
-        {
+        if (users && users.size() > 0) {
             int user_id = users[0]["id"].i();
 
-            cpr::Patch(
-                cpr::Url{SUPABASE_URL + "/password_resets"
-                         "?user_id=eq." + std::to_string(user_id) +
-                         "&used=eq.false"},
-                cpr::Header{
-                    {"apikey", API_KEY},
-                    {"Authorization", "Bearer " + API_KEY},
-                    {"Content-Type", "application/json"},
-                    {"Prefer", "return=minimal"}},
+            cpr::Patch(cpr::Url{SUPABASE_URL + "/password_resets?user_id=eq." +
+                                std::to_string(user_id) + "&used=eq.false"},
+                cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                            {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
                 cpr::Body{"{\"used\":true}"});
 
             std::string token = generate_token();
-            std::string prBody =
-                "{\"user_id\":" + std::to_string(user_id) +
-                ",\"token\":\"" + token + "\"}";
+            std::string prBody = "{\"user_id\":" + std::to_string(user_id) + ",\"token\":\"" + token + "\"}";
 
-            cpr::Post(
-                cpr::Url{SUPABASE_URL + "/password_resets"},
-                cpr::Header{
-                    {"apikey", API_KEY},
-                    {"Authorization", "Bearer " + API_KEY},
-                    {"Content-Type", "application/json"},
-                    {"Prefer", "return=minimal"}},
+            cpr::Post(cpr::Url{SUPABASE_URL + "/password_resets"},
+                cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                            {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
                 cpr::Body{prBody});
 
             const char *fe = std::getenv("FRONTEND_URL");
@@ -508,13 +380,11 @@ int main()
 
             send_email_async(email, "Reset your CampusForge password", html);
         }
-
-        return crow::response(200,
-            "{\"message\":\"If that email exists, a reset link has been sent\"}"); });
+        return crow::response(200, "{\"message\":\"If that email exists, a reset link has been sent\"}");
+    });
 
     // ================= RESET PASSWORD =================
-    CROW_ROUTE(app, "/reset-password").methods("POST"_method)([API_KEY](const crow::request &req)
-                                                              {
+    CROW_ROUTE(app, "/reset-password").methods("POST"_method)([API_KEY](const crow::request &req) {
         auto body = crow::json::load(req.body);
         if (!body) return crow::response(400, "Invalid JSON");
 
@@ -527,73 +397,48 @@ int main()
         auto now_tp2 = std::chrono::system_clock::now();
         auto now_t2  = std::chrono::system_clock::to_time_t(now_tp2);
         std::tm tm_utc2{};
-#ifdef _WIN32
-        gmtime_s(&tm_utc2, &now_t2);
-#else
         gmtime_r(&now_t2, &tm_utc2);
-#endif
         char now_buf2[32];
         std::strftime(now_buf2, sizeof(now_buf2), "%Y-%m-%dT%H:%M:%SZ", &tm_utc2);
         std::string now_str2(now_buf2);
 
         auto tr = cpr::Get(
-            cpr::Url{SUPABASE_URL + "/password_resets"
-                     "?token=eq." + token +
-                     "&used=eq.false"
-                     "&expires_at=gte." + now_str2 +
-                     "&select=id,user_id"},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY}});
+            cpr::Url{SUPABASE_URL + "/password_resets?token=eq." + token +
+                     "&used=eq.false&expires_at=gte." + now_str2 + "&select=id,user_id"},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY}});
 
         auto rows = crow::json::load(tr.text);
-        if (!rows || rows.size() == 0)
-            return crow::response(400, "{\"error\":\"Invalid or expired token\"}");
+        if (!rows || rows.size() == 0) return crow::response(400, "{\"error\":\"Invalid or expired token\"}");
 
         int row_id  = rows[0]["id"].i();
         int user_id = rows[0]["user_id"].i();
-
         std::string hashed = sha256(new_password);
 
-        cpr::Patch(
-            cpr::Url{SUPABASE_URL + "/users?id=eq." + std::to_string(user_id)},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Content-Type", "application/json"},
-                {"Prefer", "return=minimal"}},
+        cpr::Patch(cpr::Url{SUPABASE_URL + "/users?id=eq." + std::to_string(user_id)},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{"{\"password\":\"" + hashed + "\"}"});
 
-        cpr::Patch(
-            cpr::Url{SUPABASE_URL + "/password_resets?id=eq." + std::to_string(row_id)},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Content-Type", "application/json"},
-                {"Prefer", "return=minimal"}},
+        cpr::Patch(cpr::Url{SUPABASE_URL + "/password_resets?id=eq." + std::to_string(row_id)},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{"{\"used\":true}"});
 
-        return crow::response(200, "{\"message\":\"Password reset successfully\"}"); });
+        return crow::response(200, "{\"message\":\"Password reset successfully\"}");
+    });
 
     // ================= ADD PROJECT =================
-    CROW_ROUTE(app, "/add_project").methods("POST"_method)([API_KEY, &app](const crow::request &req)
-                                                           {
+    CROW_ROUTE(app, "/add_project").methods("POST"_method)([API_KEY, &app](const crow::request &req) {
         auto& ctx = app.get_context<AuthMiddleware>(req);
         auto body = crow::json::load(req.body);
         if (!body) return crow::response(400, "Invalid JSON");
-
-        if (!is_valid_status(body["status"].s()))
-            return crow::response(400, "Invalid status");
+        if (!is_valid_status(body["status"].s())) return crow::response(400, "Invalid status");
 
         bool has_contact_no = body.has("contact_no") && body["contact_no"].i() != 0;
         int64_t contact_no  = has_contact_no ? body["contact_no"].i() : 0;
-
         int team_size = body.has("team_size") ? body["team_size"].i() : 0;
-
-        std::string contact_name = body.has("contact_name")
-            ? escape_json(std::string(body["contact_name"].s())) : "";
-        std::string contact_email = body.has("contact_email")
-            ? escape_json(std::string(body["contact_email"].s())) : "";
+        std::string contact_name  = body.has("contact_name")  ? escape_json(std::string(body["contact_name"].s()))  : "";
+        std::string contact_email = body.has("contact_email") ? escape_json(std::string(body["contact_email"].s())) : "";
 
         std::string categoryJson = "[";
         if (body.has("category") && body["category"].t() == crow::json::type::List) {
@@ -606,90 +451,61 @@ int main()
         categoryJson += "]";
 
         std::string jsonBody =
-            "{"
-            "\"title\":\""         + escape_json(std::string(body["title"].s()))       + "\","
-            "\"description\":\""   + escape_json(std::string(body["description"].s())) + "\","
-            "\"skills\":\""        + escape_json(std::string(body["skills"].s()))       + "\","
-            "\"category\":"        + categoryJson                                        + ","
-            "\"team_size\":"       + std::to_string(team_size)                          + ","
-            "\"status\":\""        + escape_json(std::string(body["status"].s()))       + "\","
-            "\"contact_no\":"      + (has_contact_no ? std::to_string(contact_no) : "null") + ","
-            "\"contact_name\":\""  + contact_name                                        + "\","
-            "\"contact_email\":\"" + contact_email                                       + "\","
-            "\"owner_email\":\""   + ctx.user_email                                     + "\""
-            "}";
+            "{\"title\":\""         + escape_json(std::string(body["title"].s()))       + "\","
+            "\"description\":\""    + escape_json(std::string(body["description"].s())) + "\","
+            "\"skills\":\""         + escape_json(std::string(body["skills"].s()))       + "\","
+            "\"category\":"         + categoryJson                                        + ","
+            "\"team_size\":"        + std::to_string(team_size)                          + ","
+            "\"status\":\""         + escape_json(std::string(body["status"].s()))       + "\","
+            "\"contact_no\":"       + (has_contact_no ? std::to_string(contact_no) : "null") + ","
+            "\"contact_name\":\""   + contact_name                                        + "\","
+            "\"contact_email\":\""  + contact_email                                       + "\","
+            "\"owner_email\":\""    + ctx.user_email                                      + "\"}";
 
-        auto r = cpr::Post(
-            cpr::Url{SUPABASE_URL + "/projects"},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Content-Type", "application/json"},
-                {"Prefer", "return=minimal"}},
+        auto r = cpr::Post(cpr::Url{SUPABASE_URL + "/projects"},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{jsonBody});
-
-        return crow::response(r.status_code, r.text); });
+        return crow::response(r.status_code, r.text);
+    });
 
     // ================= GET PROJECTS =================
-    CROW_ROUTE(app, "/projects").methods("GET"_method)([API_KEY](const crow::request &req)
-                                                       {
+    CROW_ROUTE(app, "/projects").methods("GET"_method)([API_KEY](const crow::request &req) {
         std::string search = "";
         std::string status = "";
-
         if (req.url_params.get("search"))
-            search = "&title=ilike.*" +
-                     std::string(req.url_params.get("search")) + "*";
-
+            search = "&title=ilike.*" + std::string(req.url_params.get("search")) + "*";
         if (req.url_params.get("status"))
-            status = "&status=eq." +
-                     std::string(req.url_params.get("status"));
+            status = "&status=eq." + std::string(req.url_params.get("status"));
 
-        std::string url = SUPABASE_URL + "/projects?select=*" + search + status;
-
-        auto r = cpr::Get(
-            cpr::Url{url},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Range-Unit", "items"},
-                {"Range", "0-999"}});
-
-        return crow::response(r.status_code, r.text); });
+        auto r = cpr::Get(cpr::Url{SUPABASE_URL + "/projects?select=*" + search + status},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Range-Unit", "items"}, {"Range", "0-999"}});
+        return crow::response(r.status_code, r.text);
+    });
 
     // ================= MY PROJECTS =================
-    CROW_ROUTE(app, "/my_projects").methods("GET"_method)([API_KEY, &app](const crow::request &req)
-                                                          {
+    CROW_ROUTE(app, "/my_projects").methods("GET"_method)([API_KEY, &app](const crow::request &req) {
         auto& ctx = app.get_context<AuthMiddleware>(req);
-
-        auto r = cpr::Get(
-            cpr::Url{SUPABASE_URL + "/projects?owner_email=eq." + ctx.user_email},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY}});
-
-        return crow::response(r.status_code, r.text); });
+        auto r = cpr::Get(cpr::Url{SUPABASE_URL + "/projects?owner_email=eq." + ctx.user_email},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY}});
+        return crow::response(r.status_code, r.text);
+    });
 
     // ================= EDIT PROJECT =================
-    CROW_ROUTE(app, "/edit_project").methods("PUT"_method)([API_KEY, &app](const crow::request &req)
-                                                           {
+    CROW_ROUTE(app, "/edit_project").methods("PUT"_method)([API_KEY, &app](const crow::request &req) {
         auto& ctx = app.get_context<AuthMiddleware>(req);
         auto body = crow::json::load(req.body);
         if (!body) return crow::response(400, "Invalid JSON");
 
         int id = body["id"].i();
-
-        if (!is_valid_status(body["status"].s()))
-            return crow::response(400, "Invalid status");
+        if (!is_valid_status(body["status"].s())) return crow::response(400, "Invalid status");
 
         bool has_contact_no = body.has("contact_no") && body["contact_no"].i() != 0;
         int64_t contact_no  = has_contact_no ? body["contact_no"].i() : 0;
-
         int team_size = body.has("team_size") ? body["team_size"].i() : 0;
-
-        std::string contact_name = body.has("contact_name")
-            ? escape_json(std::string(body["contact_name"].s())) : "";
-        std::string contact_email = body.has("contact_email")
-            ? escape_json(std::string(body["contact_email"].s())) : "";
+        std::string contact_name  = body.has("contact_name")  ? escape_json(std::string(body["contact_name"].s()))  : "";
+        std::string contact_email = body.has("contact_email") ? escape_json(std::string(body["contact_email"].s())) : "";
 
         std::string categoryJson = "[";
         if (body.has("category") && body["category"].t() == crow::json::type::List) {
@@ -702,63 +518,44 @@ int main()
         categoryJson += "]";
 
         std::string jsonBody =
-            "{"
-            "\"title\":\""         + escape_json(std::string(body["title"].s()))       + "\","
-            "\"description\":\""   + escape_json(std::string(body["description"].s())) + "\","
-            "\"skills\":\""        + escape_json(std::string(body["skills"].s()))       + "\","
-            "\"category\":"        + categoryJson                                        + ","
-            "\"team_size\":"       + std::to_string(team_size)                          + ","
-            "\"status\":\""        + escape_json(std::string(body["status"].s()))       + "\","
-            "\"contact_no\":"      + (has_contact_no ? std::to_string(contact_no) : "null") + ","
-            "\"contact_name\":\""  + contact_name                                        + "\","
-            "\"contact_email\":\"" + contact_email                                       + "\""
-            "}";
+            "{\"title\":\""         + escape_json(std::string(body["title"].s()))       + "\","
+            "\"description\":\""    + escape_json(std::string(body["description"].s())) + "\","
+            "\"skills\":\""         + escape_json(std::string(body["skills"].s()))       + "\","
+            "\"category\":"         + categoryJson                                        + ","
+            "\"team_size\":"        + std::to_string(team_size)                          + ","
+            "\"status\":\""         + escape_json(std::string(body["status"].s()))       + "\","
+            "\"contact_no\":"       + (has_contact_no ? std::to_string(contact_no) : "null") + ","
+            "\"contact_name\":\""   + contact_name                                        + "\","
+            "\"contact_email\":\""  + contact_email                                       + "\"}";
 
-        std::string url =
-            SUPABASE_URL +
-            "/projects?id=eq." + std::to_string(id) +
-            "&owner_email=eq." + ctx.user_email;
-
-        auto r = cpr::Patch(
-            cpr::Url{url},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Content-Type", "application/json"},
-                {"Prefer", "return=minimal"}},
+        std::string url = SUPABASE_URL + "/projects?id=eq." + std::to_string(id) +
+                          "&owner_email=eq." + ctx.user_email;
+        auto r = cpr::Patch(cpr::Url{url},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{jsonBody});
-
-        return crow::response(r.status_code, r.text); });
+        return crow::response(r.status_code, r.text);
+    });
 
     // ================= DELETE PROJECT =================
-    CROW_ROUTE(app, "/delete_project").methods("DELETE"_method)([API_KEY, &app](const crow::request &req)
-                                                                {
+    CROW_ROUTE(app, "/delete_project").methods("DELETE"_method)([API_KEY, &app](const crow::request &req) {
         auto& ctx = app.get_context<AuthMiddleware>(req);
         auto body = crow::json::load(req.body);
         if (!body) return crow::response(400, "Invalid JSON");
 
         int id = body["id"].i();
-
-        std::string url =
-            SUPABASE_URL +
-            "/projects?id=eq." + std::to_string(id) +
-            "&owner_email=eq." + ctx.user_email;
-
-        auto r = cpr::Delete(
-            cpr::Url{url},
-            cpr::Header{
-                {"apikey", API_KEY},
-                {"Authorization", "Bearer " + API_KEY},
-                {"Prefer", "return=minimal"}});
-
-        return crow::response(r.status_code, r.text); });
+        std::string url = SUPABASE_URL + "/projects?id=eq." + std::to_string(id) +
+                          "&owner_email=eq." + ctx.user_email;
+        auto r = cpr::Delete(cpr::Url{url},
+            cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
+                        {"Prefer", "return=minimal"}});
+        return crow::response(r.status_code, r.text);
+    });
 
     int port = 18080;
     if (const char *p = std::getenv("PORT"))
-    {
         port = std::stoi(p);
-    }
-    app.port(port).multithreaded().run();
 
+    app.port(port).multithreaded().run();
     curl_global_cleanup();
 }
