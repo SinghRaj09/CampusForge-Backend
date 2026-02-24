@@ -11,7 +11,6 @@
 #include <random>
 #include <thread>
 #include <cstring>
-#include <vector>
 
 const std::string SUPABASE_URL =
     "https://uavcodnqypzxrvffkmqf.supabase.co/rest/v1";
@@ -43,6 +42,35 @@ std::string generate_token(size_t length = 32)
 
 // ================= JSON ESCAPE (forward declaration) =================
 std::string escape_json(const std::string &str);
+
+// ================= CORS HELPER =================
+// Returns true if the request origin is allowed
+bool is_allowed_origin(const std::string &origin)
+{
+    const char *fe = std::getenv("FRONTEND_URL");
+    std::string base = fe ? fe : "http://localhost:5173";
+
+    // Always allow exact match
+    if (origin == base) return true;
+
+    // Allow both www and non-www variants
+    // If base is https://campusforge.me, also allow https://www.campusforge.me
+    // If base is https://www.campusforge.me, also allow https://campusforge.me
+    if (base.find("://www.") != std::string::npos) {
+        // base has www, build non-www
+        std::string nowww = base.substr(0, base.find("://") + 3) +
+                            base.substr(base.find("://www.") + 7);
+        if (origin == nowww) return true;
+    } else {
+        // base has no www, build www
+        std::string withwww = base.substr(0, base.find("://") + 3) +
+                              "www." +
+                              base.substr(base.find("://") + 3);
+        if (origin == withwww) return true;
+    }
+
+    return false;
+}
 
 // ================= SEND EMAIL via Resend HTTP API =================
 bool send_email(const std::string &to,
@@ -149,47 +177,24 @@ std::string escape_json(const std::string &str)
     return result;
 }
 
-// ================= CORS HELPER =================
-// Returns true if origin is in the allowed list
-bool is_allowed_origin(const std::string &origin)
-{
-    static const std::vector<std::string> allowed = {
-        "https://campusforge.me",
-        "https://www.campusforge.me",
-        "http://localhost:5173",
-        "http://localhost:3000"
-    };
-    for (const auto &o : allowed)
-        if (origin == o) return true;
-    return false;
-}
-
-void apply_cors_headers(crow::response &res, const std::string &origin)
-{
-    res.set_header("Access-Control-Allow-Origin", origin);
-    res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    res.set_header("Access-Control-Allow-Credentials", "true");
-    res.set_header("Access-Control-Max-Age", "86400");
-}
-
-// ================= CORS MIDDLEWARE =================
+// ================= CORS =================
 struct CORSMiddleware
 {
-    struct context
-    {
-        std::string origin;
-    };
+    struct context {};
 
     void before_handle(crow::request &req,
                        crow::response &res,
-                       context &ctx)
+                       context &)
     {
         std::string origin = req.get_header_value("Origin");
-        ctx.origin = origin;
+        std::string allowed = is_allowed_origin(origin) ? origin : "";
 
-        if (is_allowed_origin(origin))
-            apply_cors_headers(res, origin);
+        if (!allowed.empty())
+            res.set_header("Access-Control-Allow-Origin", allowed);
+
+        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.set_header("Access-Control-Max-Age", "86400");
 
         if (req.method == crow::HTTPMethod::OPTIONS)
         {
@@ -199,16 +204,22 @@ struct CORSMiddleware
         }
     }
 
-    void after_handle(crow::request &,
+    void after_handle(crow::request &req,
                       crow::response &res,
-                      context &ctx)
+                      context &)
     {
-        if (is_allowed_origin(ctx.origin))
-            apply_cors_headers(res, ctx.origin);
+        std::string origin = req.get_header_value("Origin");
+        std::string allowed = is_allowed_origin(origin) ? origin : "";
+
+        if (!allowed.empty())
+            res.set_header("Access-Control-Allow-Origin", allowed);
+
+        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }
 };
 
-// ================= AUTH MIDDLEWARE =================
+// ================= AUTH =================
 struct AuthMiddleware
 {
     struct context
