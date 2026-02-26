@@ -122,34 +122,42 @@ struct CORSMiddleware
 {
     struct context {};
 
+    static bool is_allowed_origin(const std::string &origin)
+    {
+        return origin == "https://campusforge.me" ||
+               origin == "https://www.campusforge.me" ||
+               origin == "http://localhost:5173";
+    }
+
+    static void apply_cors_headers(crow::response &res, const std::string &origin)
+    {
+        if (is_allowed_origin(origin))
+            res.set_header("Access-Control-Allow-Origin", origin);
+        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.set_header("Access-Control-Allow-Credentials", "true");
+        res.set_header("Access-Control-Max-Age", "86400");
+    }
+
     void before_handle(crow::request &req, crow::response &res, context &)
     {
         std::string origin = req.get_header_value("Origin");
-        if (origin == "https://campusforge.me" ||
-            origin == "https://www.campusforge.me" ||
-            origin == "http://localhost:5173") {
-            res.set_header("Access-Control-Allow-Origin", origin);
-        }
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        res.set_header("Access-Control-Max-Age", "86400");
 
+        // Handle preflight OPTIONS immediately
         if (req.method == crow::HTTPMethod::OPTIONS) {
+            apply_cors_headers(res, origin);
             res.code = 204;
             res.end();
+            return;
         }
     }
 
     void after_handle(crow::request &req, crow::response &res, context &)
     {
+        // Always apply CORS headers to every response
+        // This runs AFTER route handlers so headers are guaranteed to be present
         std::string origin = req.get_header_value("Origin");
-        if (origin == "https://campusforge.me" ||
-            origin == "https://www.campusforge.me" ||
-            origin == "http://localhost:5173") {
-            res.set_header("Access-Control-Allow-Origin", origin);
-        }
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        apply_cors_headers(res, origin);
     }
 };
 
@@ -202,6 +210,39 @@ int main()
     crow::App<CORSMiddleware, AuthMiddleware> app;
 
     CROW_ROUTE(app, "/")([]() { return "CampusConnect Backend Running!"; });
+
+    // ================= PREFLIGHT OPTIONS ROUTES =================
+    // Explicit OPTIONS handlers ensure preflight always gets a 204 response
+    CROW_ROUTE(app, "/login").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/signup").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/forgot-password").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/reset-password").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/verify-email").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/add_project").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/projects").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/my_projects").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/edit_project").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
+    CROW_ROUTE(app, "/delete_project").methods("OPTIONS"_method)([]() {
+        return crow::response(204);
+    });
 
     // ================= SIGNUP =================
     CROW_ROUTE(app, "/signup").methods("POST"_method)([API_KEY](const crow::request &req) {
