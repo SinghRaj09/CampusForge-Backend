@@ -38,16 +38,26 @@ std::string generate_token(size_t length = 32)
 
 std::string escape_json(const std::string &str);
 
-bool is_allowed_origin(const std::string &origin)
+bool is_valid_status(const std::string &status)
 {
-    return origin == "https://campusforge.me" ||
-           origin == "https://www.campusforge.me" ||
-           origin == "http://localhost:5173";
+    return status == "live" || status == "expired";
 }
 
-bool send_email(const std::string &to,
-                const std::string &subject,
-                const std::string &html_body)
+std::string escape_json(const std::string &str)
+{
+    std::string result;
+    for (char c : str) {
+        if (c == '"') result += "\\\"";
+        else if (c == '\\') result += "\\\\";
+        else if (c == '\n') result += "\\n";
+        else if (c == '\r') result += "\\r";
+        else if (c == '\t') result += "\\t";
+        else result += c;
+    }
+    return result;
+}
+
+bool send_email(const std::string &to, const std::string &subject, const std::string &html_body)
 {
     const char *resend_key = std::getenv("RESEND_API_KEY");
     const char *from_email = std::getenv("SENDER_EMAIL");
@@ -57,12 +67,10 @@ bool send_email(const std::string &to,
     }
 
     std::string json_body =
-        "{"
-        "\"from\":\"CampusForge <" + std::string(from_email) + ">\","
+        "{\"from\":\"CampusForge <" + std::string(from_email) + ">\","
         "\"to\":[\"" + to + "\"],"
         "\"subject\":\"" + escape_json(subject) + "\","
-        "\"html\":\"" + escape_json(html_body) + "\""
-        "}";
+        "\"html\":\"" + escape_json(html_body) + "\"}";
 
     std::string response_body;
     auto write_cb = +[](char *ptr, size_t size, size_t nmemb, void *userdata) -> size_t {
@@ -93,44 +101,23 @@ bool send_email(const std::string &to,
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        std::cerr << "RESEND FAILED | " << curl_easy_strerror(res) << " | to=" << to << std::endl;
+        std::cerr << "RESEND FAILED | " << curl_easy_strerror(res) << std::endl;
         return false;
     }
     if (http_code == 200 || http_code == 201) {
         std::cerr << "RESEND SUCCESS | email sent to: " << to << std::endl;
         return true;
-    } else {
-        std::cerr << "RESEND FAILED | http_code=" << http_code << " | response=" << response_body << std::endl;
-        return false;
     }
+    std::cerr << "RESEND FAILED | http_code=" << http_code << " | " << response_body << std::endl;
+    return false;
 }
 
 void send_email_async(const std::string &to, const std::string &subject, const std::string &html_body)
 {
-    std::thread([to, subject, html_body]() {
-        send_email(to, subject, html_body);
-    }).detach();
+    std::thread([to, subject, html_body]() { send_email(to, subject, html_body); }).detach();
 }
 
-bool is_valid_status(const std::string &status)
-{
-    return status == "live" || status == "expired";
-}
-
-std::string escape_json(const std::string &str)
-{
-    std::string result;
-    for (char c : str) {
-        if (c == '"') result += "\\\"";
-        else if (c == '\\') result += "\\\\";
-        else if (c == '\n') result += "\\n";
-        else if (c == '\r') result += "\\r";
-        else if (c == '\t') result += "\\t";
-        else result += c;
-    }
-    return result;
-}
-
+// ================= CORS MIDDLEWARE =================
 struct CORSMiddleware
 {
     struct context {};
@@ -138,23 +125,35 @@ struct CORSMiddleware
     void before_handle(crow::request &req, crow::response &res, context &)
     {
         std::string origin = req.get_header_value("Origin");
-        if (is_allowed_origin(origin))
+        if (origin == "https://campusforge.me" ||
+            origin == "https://www.campusforge.me" ||
+            origin == "http://localhost:5173") {
             res.set_header("Access-Control-Allow-Origin", origin);
+        }
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
         res.set_header("Access-Control-Max-Age", "86400");
+
+        if (req.method == crow::HTTPMethod::OPTIONS) {
+            res.code = 204;
+            res.end();
+        }
     }
 
     void after_handle(crow::request &req, crow::response &res, context &)
     {
         std::string origin = req.get_header_value("Origin");
-        if (is_allowed_origin(origin))
+        if (origin == "https://campusforge.me" ||
+            origin == "https://www.campusforge.me" ||
+            origin == "http://localhost:5173") {
             res.set_header("Access-Control-Allow-Origin", origin);
+        }
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }
 };
 
+// ================= AUTH MIDDLEWARE =================
 struct AuthMiddleware
 {
     struct context { std::string user_email; };
@@ -185,7 +184,7 @@ struct AuthMiddleware
                 .verify(decoded);
             ctx.user_email = decoded.get_payload_claim("email").as_string();
         } catch (...) {
-            res.code = 401; res.write("Invalid token"); res.end(); return;
+            res.code = 401; res.write("Invalid token"); res.end();
         }
     }
 
@@ -204,16 +203,6 @@ int main()
 
     CROW_ROUTE(app, "/")([]() { return "CampusConnect Backend Running!"; });
 
-    // ================= OPTIONS PREFLIGHT =================
-    CROW_ROUTE(app, "/<path>").methods("OPTIONS"_method)([](const crow::request& req, std::string) {
-        crow::response res(204);
-        res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        res.set_header("Access-Control-Max-Age", "86400");
-        return res;
-    });
-
     // ================= SIGNUP =================
     CROW_ROUTE(app, "/signup").methods("POST"_method)([API_KEY](const crow::request &req) {
         auto body = crow::json::load(req.body);
@@ -228,8 +217,7 @@ int main()
             "\",\"email\":\""   + escape_json(email) +
             "\",\"password\":\"" + hashed + "\"}";
 
-        auto r = cpr::Post(
-            cpr::Url{SUPABASE_URL + "/users"},
+        auto r = cpr::Post(cpr::Url{SUPABASE_URL + "/users"},
             cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
                         {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{jsonBody});
@@ -312,15 +300,15 @@ int main()
         gmtime_r(&now_t, &tm_utc);
         char now_buf[32];
         std::strftime(now_buf, sizeof(now_buf), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
-        std::string now_str(now_buf);
 
         auto tr = cpr::Get(
             cpr::Url{SUPABASE_URL + "/email_verifications?token=eq." + token +
-                     "&used=eq.false&expires_at=gte." + now_str + "&select=id,user_id"},
+                     "&used=eq.false&expires_at=gte." + std::string(now_buf) + "&select=id,user_id"},
             cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY}});
 
         auto rows = crow::json::load(tr.text);
-        if (!rows || rows.size() == 0) return crow::response(400, "{\"error\":\"Invalid or expired token\"}");
+        if (!rows || rows.size() == 0)
+            return crow::response(400, "{\"error\":\"Invalid or expired token\"}");
 
         int row_id  = rows[0]["id"].i();
         int user_id = rows[0]["user_id"].i();
@@ -358,12 +346,10 @@ int main()
                 cpr::Body{"{\"used\":true}"});
 
             std::string token = generate_token();
-            std::string prBody = "{\"user_id\":" + std::to_string(user_id) + ",\"token\":\"" + token + "\"}";
-
             cpr::Post(cpr::Url{SUPABASE_URL + "/password_resets"},
                 cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
                             {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
-                cpr::Body{prBody});
+                cpr::Body{"{\"user_id\":" + std::to_string(user_id) + ",\"token\":\"" + token + "\"}"});
 
             const char *fe = std::getenv("FRONTEND_URL");
             std::string frontend_url = fe ? fe : "http://localhost:5173";
@@ -375,8 +361,7 @@ int main()
                 "<a href='" + link + "' style='background:#4f46e5;color:white;"
                 "padding:12px 24px;border-radius:6px;text-decoration:none;"
                 "display:inline-block;font-family:sans-serif'>Reset Password</a>"
-                "<p style='color:#888'>This link expires in 1 hour. "
-                "If you did not request this, you can safely ignore it.</p>";
+                "<p style='color:#888'>This link expires in 1 hour.</p>";
 
             send_email_async(email, "Reset your CampusForge password", html);
         }
@@ -390,7 +375,6 @@ int main()
 
         std::string token        = body["token"].s();
         std::string new_password = body["new_password"].s();
-
         if (new_password.size() < 8)
             return crow::response(400, "{\"error\":\"Password must be at least 8 characters\"}");
 
@@ -400,24 +384,23 @@ int main()
         gmtime_r(&now_t2, &tm_utc2);
         char now_buf2[32];
         std::strftime(now_buf2, sizeof(now_buf2), "%Y-%m-%dT%H:%M:%SZ", &tm_utc2);
-        std::string now_str2(now_buf2);
 
         auto tr = cpr::Get(
             cpr::Url{SUPABASE_URL + "/password_resets?token=eq." + token +
-                     "&used=eq.false&expires_at=gte." + now_str2 + "&select=id,user_id"},
+                     "&used=eq.false&expires_at=gte." + std::string(now_buf2) + "&select=id,user_id"},
             cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY}});
 
         auto rows = crow::json::load(tr.text);
-        if (!rows || rows.size() == 0) return crow::response(400, "{\"error\":\"Invalid or expired token\"}");
+        if (!rows || rows.size() == 0)
+            return crow::response(400, "{\"error\":\"Invalid or expired token\"}");
 
         int row_id  = rows[0]["id"].i();
         int user_id = rows[0]["user_id"].i();
-        std::string hashed = sha256(new_password);
 
         cpr::Patch(cpr::Url{SUPABASE_URL + "/users?id=eq." + std::to_string(user_id)},
             cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
                         {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
-            cpr::Body{"{\"password\":\"" + hashed + "\"}"});
+            cpr::Body{"{\"password\":\"" + sha256(new_password) + "\"}"});
 
         cpr::Patch(cpr::Url{SUPABASE_URL + "/password_resets?id=eq." + std::to_string(row_id)},
             cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
@@ -451,16 +434,16 @@ int main()
         categoryJson += "]";
 
         std::string jsonBody =
-            "{\"title\":\""         + escape_json(std::string(body["title"].s()))       + "\","
-            "\"description\":\""    + escape_json(std::string(body["description"].s())) + "\","
-            "\"skills\":\""         + escape_json(std::string(body["skills"].s()))       + "\","
-            "\"category\":"         + categoryJson                                        + ","
-            "\"team_size\":"        + std::to_string(team_size)                          + ","
-            "\"status\":\""         + escape_json(std::string(body["status"].s()))       + "\","
-            "\"contact_no\":"       + (has_contact_no ? std::to_string(contact_no) : "null") + ","
-            "\"contact_name\":\""   + contact_name                                        + "\","
-            "\"contact_email\":\""  + contact_email                                       + "\","
-            "\"owner_email\":\""    + ctx.user_email                                      + "\"}";
+            "{\"title\":\""        + escape_json(std::string(body["title"].s()))       + "\","
+            "\"description\":\""   + escape_json(std::string(body["description"].s())) + "\","
+            "\"skills\":\""        + escape_json(std::string(body["skills"].s()))       + "\","
+            "\"category\":"        + categoryJson                                        + ","
+            "\"team_size\":"       + std::to_string(team_size)                          + ","
+            "\"status\":\""        + escape_json(std::string(body["status"].s()))       + "\","
+            "\"contact_no\":"      + (has_contact_no ? std::to_string(contact_no) : "null") + ","
+            "\"contact_name\":\""  + contact_name                                        + "\","
+            "\"contact_email\":\"" + contact_email                                       + "\","
+            "\"owner_email\":\""   + ctx.user_email                                      + "\"}";
 
         auto r = cpr::Post(cpr::Url{SUPABASE_URL + "/projects"},
             cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
@@ -518,19 +501,18 @@ int main()
         categoryJson += "]";
 
         std::string jsonBody =
-            "{\"title\":\""         + escape_json(std::string(body["title"].s()))       + "\","
-            "\"description\":\""    + escape_json(std::string(body["description"].s())) + "\","
-            "\"skills\":\""         + escape_json(std::string(body["skills"].s()))       + "\","
-            "\"category\":"         + categoryJson                                        + ","
-            "\"team_size\":"        + std::to_string(team_size)                          + ","
-            "\"status\":\""         + escape_json(std::string(body["status"].s()))       + "\","
-            "\"contact_no\":"       + (has_contact_no ? std::to_string(contact_no) : "null") + ","
-            "\"contact_name\":\""   + contact_name                                        + "\","
-            "\"contact_email\":\""  + contact_email                                       + "\"}";
+            "{\"title\":\""        + escape_json(std::string(body["title"].s()))       + "\","
+            "\"description\":\""   + escape_json(std::string(body["description"].s())) + "\","
+            "\"skills\":\""        + escape_json(std::string(body["skills"].s()))       + "\","
+            "\"category\":"        + categoryJson                                        + ","
+            "\"team_size\":"       + std::to_string(team_size)                          + ","
+            "\"status\":\""        + escape_json(std::string(body["status"].s()))       + "\","
+            "\"contact_no\":"      + (has_contact_no ? std::to_string(contact_no) : "null") + ","
+            "\"contact_name\":\""  + contact_name                                        + "\","
+            "\"contact_email\":\"" + contact_email                                       + "\"}";
 
-        std::string url = SUPABASE_URL + "/projects?id=eq." + std::to_string(id) +
-                          "&owner_email=eq." + ctx.user_email;
-        auto r = cpr::Patch(cpr::Url{url},
+        auto r = cpr::Patch(
+            cpr::Url{SUPABASE_URL + "/projects?id=eq." + std::to_string(id) + "&owner_email=eq." + ctx.user_email},
             cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
                         {"Content-Type", "application/json"}, {"Prefer", "return=minimal"}},
             cpr::Body{jsonBody});
@@ -544,9 +526,8 @@ int main()
         if (!body) return crow::response(400, "Invalid JSON");
 
         int id = body["id"].i();
-        std::string url = SUPABASE_URL + "/projects?id=eq." + std::to_string(id) +
-                          "&owner_email=eq." + ctx.user_email;
-        auto r = cpr::Delete(cpr::Url{url},
+        auto r = cpr::Delete(
+            cpr::Url{SUPABASE_URL + "/projects?id=eq." + std::to_string(id) + "&owner_email=eq." + ctx.user_email},
             cpr::Header{{"apikey", API_KEY}, {"Authorization", "Bearer " + API_KEY},
                         {"Prefer", "return=minimal"}});
         return crow::response(r.status_code, r.text);
