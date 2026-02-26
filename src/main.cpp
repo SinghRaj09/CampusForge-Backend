@@ -124,18 +124,23 @@ struct CORSMiddleware
 
     static void apply_cors_headers(crow::response &res, const std::string &origin)
     {
-        // Debug log — check Railway logs to see what origin arrives
         std::cerr << "DEBUG Origin header: [" << origin << "]" << std::endl;
 
-        // Echo origin back if present, otherwise allow all
-        if (!origin.empty()) {
+        if (origin == "https://campusforge.me" ||
+            origin == "https://www.campusforge.me" ||
+            origin == "http://localhost:5173") {
+            // Known origin — echo it back with credentials
             res.set_header("Access-Control-Allow-Origin", origin);
+            res.set_header("Access-Control-Allow-Credentials", "true");
         } else {
-            res.set_header("Access-Control-Allow-Origin", "*");
+            // Railway stripped the Origin header — default to www.campusforge.me
+            res.set_header("Access-Control-Allow-Origin", "https://www.campusforge.me");
+            res.set_header("Access-Control-Allow-Credentials", "true");
+            res.set_header("Vary", "Origin");
         }
+
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        res.set_header("Access-Control-Allow-Credentials", "true");
         res.set_header("Access-Control-Max-Age", "86400");
     }
 
@@ -143,7 +148,6 @@ struct CORSMiddleware
     {
         std::string origin = req.get_header_value("Origin");
 
-        // Respond to preflight immediately
         if (req.method == crow::HTTPMethod::OPTIONS) {
             apply_cors_headers(res, origin);
             res.code = 204;
@@ -154,7 +158,6 @@ struct CORSMiddleware
 
     void after_handle(crow::request &req, crow::response &res, context &)
     {
-        // Apply CORS headers to ALL responses (after route handler runs)
         std::string origin = req.get_header_value("Origin");
         apply_cors_headers(res, origin);
     }
