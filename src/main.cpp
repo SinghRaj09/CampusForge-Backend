@@ -122,17 +122,17 @@ struct CORSMiddleware
 {
     struct context {};
 
-    static bool is_allowed_origin(const std::string &origin)
-    {
-        return origin == "https://campusforge.me" ||
-               origin == "https://www.campusforge.me" ||
-               origin == "http://localhost:5173";
-    }
-
     static void apply_cors_headers(crow::response &res, const std::string &origin)
     {
-        if (is_allowed_origin(origin))
+        // Debug log — check Railway logs to see what origin arrives
+        std::cerr << "DEBUG Origin header: [" << origin << "]" << std::endl;
+
+        // Echo origin back if present, otherwise allow all
+        if (!origin.empty()) {
             res.set_header("Access-Control-Allow-Origin", origin);
+        } else {
+            res.set_header("Access-Control-Allow-Origin", "*");
+        }
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
         res.set_header("Access-Control-Allow-Credentials", "true");
@@ -143,7 +143,7 @@ struct CORSMiddleware
     {
         std::string origin = req.get_header_value("Origin");
 
-        // Handle preflight OPTIONS immediately
+        // Respond to preflight immediately
         if (req.method == crow::HTTPMethod::OPTIONS) {
             apply_cors_headers(res, origin);
             res.code = 204;
@@ -154,8 +154,7 @@ struct CORSMiddleware
 
     void after_handle(crow::request &req, crow::response &res, context &)
     {
-        // Always apply CORS headers to every response
-        // This runs AFTER route handlers so headers are guaranteed to be present
+        // Apply CORS headers to ALL responses (after route handler runs)
         std::string origin = req.get_header_value("Origin");
         apply_cors_headers(res, origin);
     }
@@ -212,7 +211,6 @@ int main()
     CROW_ROUTE(app, "/")([]() { return "CampusConnect Backend Running!"; });
 
     // ================= PREFLIGHT OPTIONS ROUTES =================
-    // Explicit OPTIONS handlers ensure preflight always gets a 204 response
     CROW_ROUTE(app, "/login").methods("OPTIONS"_method)([]() {
         return crow::response(204);
     });
